@@ -14,13 +14,30 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 """
 
 def add_gaussian_noise(image, mean=0, sigma=20):
+    """
+    I_noisy=(x,y)=I(x,y)+N(μ,σ^2)
+
+    Где:
+    I(x,y) — исходная яркость пикселя в точке (x,y),
+    N(μ,σ^2) — случайная величина из нормального распределения,
+    μ (mean) — среднее значение шума (обычно 0),
+    σ (sigma) — стандартное отклонение (сила шума).
+    """
     noisy = image.copy().astype(np.float32)
+
     for i in range(image.shape[0]):
         for j in range(image.shape[1]):
             noisy[i, j] += random.gauss(mean, sigma)
+
     return np.clip(noisy, 0, 255).astype(np.uint8)
 
 def mean_filter(image, kernel_size=3):
+    """
+    I_filtered(i,j)=1/k^2 * x=−p∑p y=−p∑p I(i+x,j+y)
+
+    k — размер ядра (kernel_size),
+    p=k//2 (например, для k=3: p=1).
+    """
     pad = kernel_size // 2
     padded = np.pad(image, pad, mode='edge')
     filtered = np.zeros_like(image)
@@ -31,9 +48,14 @@ def mean_filter(image, kernel_size=3):
     return filtered.astype(np.uint8)
 
 def laplacian_of_gaussian(image, kernel_size=5, sigma=1.0):
+    """
+    LoG(x,y)=−(1/πσ^4)(1−(x^2+y^2/2σ^2))exp[−x^2+y^2/2σ^2]
+    """
     def log_kernel(size):
         kernel = np.zeros((size, size), dtype=np.float32)
+        "Создание ядра LoG, дискретного аналога оператора ∇^2G"
         offset = size // 2
+
         for x in range(-offset, offset + 1):
             for y in range(-offset, offset + 1):
                 r2 = x**2 + y**2
@@ -42,20 +64,29 @@ def laplacian_of_gaussian(image, kernel_size=5, sigma=1.0):
                     np.exp(-r2 / (2 * sigma**2))
                 )
         kernel -= np.mean(kernel)
+
         return kernel
 
     kernel = log_kernel(kernel_size)
     pad = kernel_size // 2
     padded = np.pad(image, pad, mode='edge')
     result = np.zeros_like(image, dtype=np.float32)
+
     for i in range(image.shape[0]):
         for j in range(image.shape[1]):
             region = padded[i:i+kernel_size, j:j+kernel_size]
             result[i, j] = np.sum(region * kernel)
+
     return np.clip(result, 0, 255).astype(np.uint8)
 
 def eikvil_threshold(image, epsilon=1):
-    T = np.mean(image)
+    """
+    Алгоритм ищет оптимальный порог T, разделяющий изображение на два класса:
+
+    Класс 1 (G₁): Пиксели со значениями > T (обычно объекты)
+    Класс 2 (G₂): Пиксели со значениями ≤ T (обычно фон)
+    """
+    T = np.mean(image) # Начальный порог ==> средняя интенсивность
     prev_T = 0
     while abs(T - prev_T) >= epsilon:
         G1 = image[image > T]
@@ -65,6 +96,7 @@ def eikvil_threshold(image, epsilon=1):
         prev_T = T
         T = (m1 + m2) / 2
     binary = (image > T).astype(np.uint8) * 255
+    # Пиксели выше порога становятся 255 (белые), остальные — 0 (чёрные).
     return binary
 
 def abutaleb_threshold(image):
