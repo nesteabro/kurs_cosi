@@ -1,0 +1,204 @@
+import sys
+import cv2
+import numpy as np
+import random
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QLabel, QPushButton,
+    QFileDialog, QVBoxLayout, QWidget, QHBoxLayout
+)
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
+"""
+Расчетные, вспомогательные функции
+"""
+
+def add_gaussian_noise(image, mean=0, sigma=20):
+    noisy = image.copy().astype(np.float32)
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            noisy[i, j] += random.gauss(mean, sigma)
+    return np.clip(noisy, 0, 255).astype(np.uint8)
+
+def mean_filter(image, kernel_size=3):
+    pad = kernel_size // 2
+    padded = np.pad(image, pad, mode='edge')
+    filtered = np.zeros_like(image)
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            region = padded[i:i+kernel_size, j:j+kernel_size]
+            filtered[i, j] = np.mean(region)
+    return filtered.astype(np.uint8)
+
+def laplacian_of_gaussian(image, kernel_size=5, sigma=1.0):
+    def log_kernel(size):
+        kernel = np.zeros((size, size), dtype=np.float32)
+        offset = size // 2
+        for x in range(-offset, offset + 1):
+            for y in range(-offset, offset + 1):
+                r2 = x**2 + y**2
+                kernel[x + offset, y + offset] = (
+                    ((r2 - 2 * sigma**2) / (sigma**4)) *
+                    np.exp(-r2 / (2 * sigma**2))
+                )
+        kernel -= np.mean(kernel)
+        return kernel
+
+    kernel = log_kernel(kernel_size)
+    pad = kernel_size // 2
+    padded = np.pad(image, pad, mode='edge')
+    result = np.zeros_like(image, dtype=np.float32)
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            region = padded[i:i+kernel_size, j:j+kernel_size]
+            result[i, j] = np.sum(region * kernel)
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+def eikvil_threshold(image, epsilon=1):
+    T = np.mean(image)
+    prev_T = 0
+    while abs(T - prev_T) >= epsilon:
+        G1 = image[image > T]
+        G2 = image[image <= T]
+        m1 = G1.mean() if len(G1) > 0 else 0
+        m2 = G2.mean() if len(G2) > 0 else 0
+        prev_T = T
+        T = (m1 + m2) / 2
+    binary = (image > T).astype(np.uint8) * 255
+    return binary
+
+def abutaleb_threshold(image):
+    hist2d = np.zeros((256, 256), dtype=np.float64)
+    padded = np.pad(image, 1, mode='edge')
+    for i in range(1, padded.shape[0] - 1):
+        for j in range(1, padded.shape[1] - 1):
+            context = np.mean(padded[i - 1:i + 2, j - 1:j + 2])
+            pixel = padded[i, j]
+            hist2d[int(pixel), int(context)] += 1
+
+    hist2d /= hist2d.sum()
+    max_ent = -np.inf
+    threshold = 0
+
+    for t in range(1, 255):
+        P1 = hist2d[:t+1, :t+1]
+        P2 = hist2d[t+1:, t+1:]
+
+        w1 = P1.sum()
+        w2 = P2.sum()
+
+        if w1 == 0 or w2 == 0:
+            continue
+
+        h1 = -np.sum(P1[P1 > 0] * np.log(P1[P1 > 0]))
+        h2 = -np.sum(P2[P2 > 0] * np.log(P2[P2 > 0]))
+        total_entropy = h1 + h2
+
+        if total_entropy > max_ent:
+            max_ent = total_entropy
+            threshold = t
+
+    binary = (image > threshold).astype(np.uint8) * 255
+    return binary
+
+"""
+Втроенная оптимизация QT
+"""
+
+class ProcessingThread(QThread):
+    result_ready = pyqtSignal(np.ndarray)
+
+    def __init__(self, image, operation):
+        super().__init__()
+        self.image = image
+        self.operation = operation
+
+    def run(self):
+        if self.operation == "noise":
+            result = add_gaussian_noise(self.image)
+        elif self.operation == "filter":
+            result = mean_filter(self.image)
+        elif self.operation == "log":
+            result = laplacian_of_gaussian(self.image)
+        elif self.operation == "eikvil":
+            result = eikvil_threshold(self.image)
+        elif self.operation == "abutaleb":
+            result = abutaleb_threshold(self.image)
+        else:
+            result = self.image
+        self.result_ready.emit(result)
+
+"""
+Приложение
+"""
+
+class ImageProcessor(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Обработка цифровых изображений — курсовая")
+
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+
+        self.original_image = None
+        self.processed_image = None
+
+        # Кнопки
+        load_btn = QPushButton("Загрузить")
+        noise_btn = QPushButton("Добавить шум")
+        filter_btn = QPushButton("Фильтрация")
+        log_btn = QPushButton("Оператор ЛоГ")
+        eikvil_btn = QPushButton("Сегм. Эйквила")
+        abutaleb_btn = QPushButton("Сегм. Абуталеба")
+
+        load_btn.clicked.connect(self.load_image)
+        noise_btn.clicked.connect(lambda: self.process("noise"))
+        filter_btn.clicked.connect(lambda: self.process("filter"))
+        log_btn.clicked.connect(lambda: self.process("log"))
+        eikvil_btn.clicked.connect(lambda: self.process("eikvil"))
+        abutaleb_btn.clicked.connect(lambda: self.process("abutaleb"))
+
+        # Layout
+        btn_layout = QHBoxLayout()
+        for btn in [load_btn, noise_btn, filter_btn, log_btn, eikvil_btn, abutaleb_btn]:
+            btn_layout.addWidget(btn)
+
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(self.image_label)
+        main_layout.addLayout(btn_layout)
+
+        container = QWidget()
+        container.setLayout(main_layout)
+        self.setCentralWidget(container)
+
+    def load_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Выбрать изображение", "", "Images (*.png *.jpg *.bmp)")
+        if path:
+            img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            self.original_image = img
+            self.processed_image = img.copy()
+            self.display_image(img)
+
+    def display_image(self, image):
+        height, width = image.shape
+        bytes_per_line = width
+        q_img = QImage(image.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        pixmap = QPixmap.fromImage(q_img).scaled(512, 512, Qt.KeepAspectRatio)
+        self.image_label.setPixmap(pixmap)
+
+    def process(self, operation):
+        if self.processed_image is not None:
+            self.thread = ProcessingThread(self.processed_image, operation)
+            self.thread.result_ready.connect(self.on_result)
+            self.thread.start()
+
+    def on_result(self, result):
+        self.processed_image = result
+        self.display_image(result)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ImageProcessor()
+    window.show()
+    sys.exit(app.exec_())
