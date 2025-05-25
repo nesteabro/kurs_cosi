@@ -192,6 +192,7 @@ class ImageProcessor(QMainWindow):
         log_btn = QPushButton("Оператор ЛоГ")
         eikvil_btn = QPushButton("Сегм. Эйквила")
         abutaleb_btn = QPushButton("Сегм. Абуталеба")
+        reset_btn = QPushButton("Сбросить")  # Добавлена кнопка сброса
 
         load_btn.clicked.connect(self.load_image)
         noise_btn.clicked.connect(lambda: self.process("noise"))
@@ -199,10 +200,11 @@ class ImageProcessor(QMainWindow):
         log_btn.clicked.connect(lambda: self.process("log"))
         eikvil_btn.clicked.connect(lambda: self.process("eikvil"))
         abutaleb_btn.clicked.connect(lambda: self.process("abutaleb"))
+        reset_btn.clicked.connect(self.reset_image)  # Связываем кнопку со сбросом
 
         # Layout
         btn_layout = QHBoxLayout()
-        for btn in [load_btn, noise_btn, filter_btn, log_btn, eikvil_btn, abutaleb_btn]:
+        for btn in [load_btn, noise_btn, filter_btn, log_btn, eikvil_btn, abutaleb_btn, reset_btn]:
             btn_layout.addWidget(btn)
 
         main_layout = QVBoxLayout()
@@ -220,6 +222,11 @@ class ImageProcessor(QMainWindow):
             self.original_image = img
             self.processed_image = img.copy()
             self.display_image(img)
+
+    def reset_image(self):
+        if self.original_image is not None:
+            self.processed_image = self.original_image.copy()
+            self.display_image(self.processed_image)
 
     def display_image(self, image):
         height, width = image.shape
