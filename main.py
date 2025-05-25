@@ -99,39 +99,49 @@ def eikvil_threshold(image, epsilon=1):
     # Пиксели выше порога становятся 255 (белые), остальные — 0 (чёрные).
     return binary
 
+
 def abutaleb_threshold(image):
+    # Построение двумерной гистограммы
     hist2d = np.zeros((256, 256), dtype=np.float64)
     padded = np.pad(image, 1, mode='edge')
+
     for i in range(1, padded.shape[0] - 1):
         for j in range(1, padded.shape[1] - 1):
-            context = np.mean(padded[i - 1:i + 2, j - 1:j + 2])
-            pixel = padded[i, j]
-            hist2d[int(pixel), int(context)] += 1
+            neighborhood = padded[i - 1:i + 2, j - 1:j + 2]
+            avg_local = int(np.mean(neighborhood))
+            pixel_val = int(padded[i, j])
+            hist2d[pixel_val, avg_local] += 1
 
-    hist2d /= hist2d.sum()
-    max_ent = -np.inf
-    threshold = 0
+    # Нормализация гистограммы
+    hist2d /= np.sum(hist2d)
+
+    max_entropy = -np.inf
+    best_t = 0
 
     for t in range(1, 255):
-        P1 = hist2d[:t+1, :t+1]
-        P2 = hist2d[t+1:, t+1:]
+        # Подматрицы A и B
+        A = hist2d[:t+1, :t+1]
+        B = hist2d[t+1:, t+1:]
 
-        w1 = P1.sum()
-        w2 = P2.sum()
+        pA = A.sum()
+        pB = B.sum()
 
-        if w1 == 0 or w2 == 0:
+        if pA == 0 or pB == 0:
             continue
 
-        h1 = -np.sum(P1[P1 > 0] * np.log(P1[P1 > 0]))
-        h2 = -np.sum(P2[P2 > 0] * np.log(P2[P2 > 0]))
-        total_entropy = h1 + h2
+        hA = -np.sum((A / pA) * np.log((A + 1e-12) / pA))
+        hB = -np.sum((B / pB) * np.log((B + 1e-12) / pB))
 
-        if total_entropy > max_ent:
-            max_ent = total_entropy
-            threshold = t
+        total_entropy = hA + hB
 
-    binary = (image > threshold).astype(np.uint8) * 255
+        if total_entropy > max_entropy:
+            max_entropy = total_entropy
+            best_t = t
+
+    # Бинаризация по найденному порогу
+    binary = np.where(image > best_t, 255, 0).astype(np.uint8)
     return binary
+
 
 """
 Втроенная оптимизация QT
