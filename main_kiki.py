@@ -83,20 +83,60 @@ class ImageProcessor(QWidget):
         self.image = edges * 255
         self.display_image(self.image)
 
+
     def eykvil_segmentation(self):
         if self.image is None:
             return
-        flat = self.image.flatten()
-        thresholds = np.percentile(flat, [25, 50, 75])
-        segmented = np.zeros_like(self.image)
-        for i in range(segmented.shape[0]):
-            for j in range(segmented.shape[1]):
-                val = self.image[i, j]
-                if val < thresholds[0]: segmented[i, j] = 64
-                elif val < thresholds[1]: segmented[i, j] = 128
-                elif val < thresholds[2]: segmented[i, j] = 192
-                else: segmented[i, j] = 255
-        self.image = segmented
+
+        img = self.image.copy()
+        small_size = 8    # размер малого окна S
+        large_size = 24   # размер большого окна L
+        l_threshold = 15  # минимальная разница средних
+
+        height, width = img.shape
+        result = np.zeros_like(img)
+
+        pad = large_size // 2
+        padded = np.pad(img, pad, mode='edge')
+
+        for y in range(0, height, small_size):
+            for x in range(0, width, small_size):
+                cy, cx = y + small_size // 2, x + small_size // 2
+                cy_p, cx_p = cy + pad, cx + pad
+
+                # Большое окно L
+                L = padded[cy_p - large_size // 2: cy_p + large_size // 2,
+                           cx_p - large_size // 2: cx_p + large_size // 2].flatten()
+
+                if L.size == 0:
+                    continue
+
+                # Порог — среднее по окну L
+                B = np.mean(L)
+
+                # Кластеры
+                G1 = [v for v in L if v <= B]
+                G2 = [v for v in L if v > B]
+
+                if len(G1) == 0 or len(G2) == 0:
+                    continue
+
+                mu1 = sum(G1) / len(G1)
+                mu2 = sum(G2) / len(G2)
+
+                # Малое окно S (без padding)
+                S = img[y:y + small_size, x:x + small_size]
+
+                if abs(mu1 - mu2) >= l_threshold:
+                    # Бинаризация в S по порогу B
+                    binarized = np.where(S > B, 255, 0)
+                    result[y:y + small_size, x:x + small_size] = binarized
+                else:
+                    # Усреднение яркости в S
+                    mean_val = int(np.mean(S))
+                    result[y:y + small_size, x:x + small_size] = mean_val
+
+        self.image = result
         self.display_image(self.image)
 
     def sezan_segmentation(self):
