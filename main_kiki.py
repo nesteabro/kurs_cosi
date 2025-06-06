@@ -1,11 +1,13 @@
+#Загрузка библиотек
 import sys
 import numpy as np
 import cv2
+import random
 from PyQt5.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, QWidget,
                              QFileDialog, QHBoxLayout)
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
-
+#Класс обработки изображений
 class ImageProcessor(QWidget):
     def __init__(self):
         super().__init__()
@@ -46,34 +48,38 @@ class ImageProcessor(QWidget):
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
-
+#Загрузка изображения и преобразование в полутоновое
     def load_image(self):
         fname, _ = QFileDialog.getOpenFileName(self, 'Открыть файл', '.', 'Image files (*.png *.jpg *.bmp)')
         if fname:
             self.image = cv2.imread(fname, cv2.IMREAD_GRAYSCALE).astype(np.float32)
             self.original_image = self.image.copy()
             self.display_image(self.image)
-
+#Отображение изображения
     def display_image(self, img):
         img = np.clip(img, 0, 255).astype(np.uint8)
         h, w = img.shape
         q_img = QImage(img.data, w, h, w, QImage.Format_Grayscale8)
         self.image_label.setPixmap(QPixmap.fromImage(q_img).scaled(self.image_label.size(), Qt.KeepAspectRatio))
+#Гауссов шум
+    def add_gaussian_noise(self, mean=0, sigma=20):
+       
+        noisy = self.image.copy().astype(np.float32)
 
-    def add_gaussian_noise(self):
-        if self.image is None:
-            return
-        noise = np.random.normal(0, 25, self.image.shape)
-        self.image = np.clip(self.image + noise, 0, 255)
+        for i in range(self.image.shape[0]):
+            for j in range(self.image.shape[1]):
+                noisy[i, j] += random.gauss(mean, sigma)
+
+        self.image = np.clip(noisy, 0, 255).astype(np.uint8)
         self.display_image(self.image)
-
+#Низкочастотный фильтр
     def low_pass_filter(self):
         if self.image is None:
             return
         kernel = np.ones((5, 5), dtype=np.float32) / 25
         self.image = self.convolve(self.image, kernel)
         self.display_image(self.image)
-
+#Оператор Марр-Хилдрета
     def marr_hildreth_edge(self):
         if self.image is None:
             return
@@ -83,7 +89,7 @@ class ImageProcessor(QWidget):
         self.image = edges * 255
         self.display_image(self.image)
 
-
+#Сегментация Эйквила
     def eykvil_segmentation(self):
         if self.image is None:
             return
@@ -138,7 +144,7 @@ class ImageProcessor(QWidget):
 
         self.image = result
         self.display_image(self.image)
-
+#Сегментация Сезана
     def sezan_segmentation(self):
         if self.image is None:
             return
@@ -155,12 +161,12 @@ class ImageProcessor(QWidget):
         segmented = (self.image > t) * 255
         self.image = segmented
         self.display_image(self.image)
-
+    #Возвращение исходного изображения
     def reset_image(self):
         if self.original_image is not None:
             self.image = self.original_image.copy()
             self.display_image(self.image)
-
+    #Свертка
     def convolve(self, img, kernel):
         k = kernel.shape[0] // 2
         padded = np.pad(img, k, mode='edge')
@@ -170,13 +176,13 @@ class ImageProcessor(QWidget):
                 region = padded[i:i+2*k+1, j:j+2*k+1]
                 result[i, j] = np.sum(region * kernel)
         return result
-
+    #Ядро Гаусс
     def gaussian_kernel(self, size, sigma):
         ax = np.linspace(-(size // 2), size // 2, size)
         gauss = np.exp(-0.5 * np.square(ax) / sigma**2)
         kernel = np.outer(gauss, gauss)
         return kernel / np.sum(kernel)
-
+    #Ядро Лапласиан Гаусс
     def laplacian_of_gaussian(self, img):
         kernel = np.array([[0,  0, -1,  0,  0],
                            [0, -1, -2, -1,  0],
@@ -184,7 +190,7 @@ class ImageProcessor(QWidget):
                            [0, -1, -2, -1,  0],
                            [0,  0, -1,  0,  0]], dtype=np.float32)
         return self.convolve(img, kernel)
-
+    #Вспомогательная функция
     def zero_crossing(self, log_img):
         zc = np.zeros_like(log_img, dtype=np.uint8)
         for i in range(1, log_img.shape[0] - 1):
